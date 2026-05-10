@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jakpat Radio</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;800&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary: #ff4757;
+            --primary-glow: rgba(255, 71, 87, 0.4);
+            --bg-gradient: radial-gradient(circle at top, #1a153a 0%, #0a0813 100%);
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --text: #ffffff;
+            --text-secondary: #94a3b8;
+            --volume-percent: 80%; /* Dynamically updated via JS */
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        /* Glassmorphism Player Container */
+        .player-container {
+            background: var(--card-bg);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            border: 1px solid var(--card-border);
+            border-radius: 36px;
+            padding: 40px;
+            width: 100%;
+            max-width: 380px;
+            text-align: center;
+            box-shadow: 
+                0 30px 60px rgba(0, 0, 0, 0.6),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .player-container:hover {
+            transform: translateY(-8px);
+        }
+
+        /* Vinyl/Art Container */
+        .station-art-container {
+            position: relative;
+            width: 180px;
+            height: 180px;
+            margin: 0 auto 35px;
+        }
+
+        .station-art {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: repeating-radial-gradient(
+                circle,
+                #2c2c2c,
+                #121212 10%,
+                #2c2c2c 20%
+            );
+            border: 8px solid #1c1c1e;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
+            transition: transform 0.5s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Inner label of the vinyl record */
+        .station-art::before {
+            content: '';
+            position: absolute;
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), #ff6b81);
+            z-index: 1;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.3);
+        }
+
+        /* Vinyl center hole */
+        .station-art::after {
+            content: '';
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #0a0813;
+            z-index: 2;
+        }
+
+        .station-art svg {
+            width: 40px;
+            height: 40px;
+            fill: #fff;
+            z-index: 3;
+            filter: drop-shadow(0 2px 5px rgba(0,0,0,0.3));
+        }
+
+        /* Active animations when playing */
+        .station-art-container.playing .station-art {
+            animation: rotateVinyl 12s linear infinite;
+        }
+
+        /* Outer pulse indicator */
+        .station-art-container::before {
+            content: '';
+            position: absolute;
+            top: -10px;
+            left: -10px;
+            right: -10px;
+            bottom: -10px;
+            border-radius: 50%;
+            border: 2px solid var(--primary);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        .station-art-container.playing::before {
+            animation: pulse 2s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+            opacity: 0.8;
+        }
+
+        /* Typography & Scroll Container */
+        .meta {
+            margin-bottom: 35px;
+            overflow: hidden;
+        }
+
+        .meta h1 {
+            font-size: 26px;
+            font-weight: 800;
+            margin-bottom: 6px;
+            letter-spacing: -0.5px;
+            background: linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        /* Horizontal scrolling container for song titles */
+        .track-info-container {
+            width: 100%;
+            overflow: hidden;
+            position: relative;
+            white-space: nowrap;
+            height: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .track-info {
+            display: inline-block;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 400;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding-left: 100%;
+            animation: marquee 15s linear infinite;
+            animation-play-state: paused;
+        }
+
+        /* When the title isn't playing yet or doesn't need to scroll */
+        .track-info.static {
+            animation: none;
+            padding-left: 0;
+        }
+
+        /* Mini Equalizer Visualizer */
+        .visualizer {
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            gap: 3px;
+            height: 15px;
+            margin-top: 10px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .visualizer.active {
+            opacity: 1;
+        }
+
+        .visualizer-bar {
+            width: 3px;
+            height: 2px;
+            background-color: var(--primary);
+            border-radius: 3px;
+        }
+
+        .visualizer.active .visualizer-bar:nth-child(1) { animation: bounce 0.8s ease-in-out infinite alternate; }
+        .visualizer.active .visualizer-bar:nth-child(2) { animation: bounce 1.1s ease-in-out infinite alternate 0.1s; }
+        .visualizer.active .visualizer-bar:nth-child(3) { animation: bounce 0.9s ease-in-out infinite alternate 0.2s; }
+        .visualizer.active .visualizer-bar:nth-child(4) { animation: bounce 1.2s ease-in-out infinite alternate 0.15s; }
+
+        /* Play Button Container */
+        .controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .play-btn {
+            background: #ffffff;
+            border: none;
+            width: 84px;
+            height: 84px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            position: relative;
+        }
+
+        .play-btn:hover {
+            transform: scale(1.08);
+            background: var(--primary);
+            box-shadow: 0 12px 30px var(--primary-glow);
+        }
+
+        .play-btn:hover svg {
+            fill: #ffffff;
+        }
+
+        .play-btn svg {
+            width: 30px;
+            height: 30px;
+            fill: #0f0c20;
+            transition: fill 0.3s ease, transform 0.3s ease;
+        }
+
+        .play-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Volume Control Custom Slider Style */
+        .volume-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            width: 85%;
+            margin-top: 5px;
+        }
+
+        .volume-icon-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+
+        .volume-container svg {
+            width: 20px;
+            height: 20px;
+            fill: var(--text-secondary);
+            transition: fill 0.2s, transform 0.1s;
+        }
+
+        .volume-icon-btn:hover svg {
+            fill: var(--text);
+            transform: scale(1.1);
+        }
+
+        .volume-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            outline: none;
+            cursor: pointer;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Webkit slider progress tracking using CSS variables */
+        .volume-slider::-webkit-slider-runnable-track {
+            height: 6px;
+            background: linear-gradient(to right, var(--primary) 0%, var(--primary) var(--volume-percent), rgba(255, 255, 255, 0.08) var(--volume-percent), rgba(255, 255, 255, 0.08) 100%);
+            border-radius: 10px;
+        }
+
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ffffff;
+            margin-top: -3px;
+            box-shadow: 0 0 4px rgba(0,0,0,0.5);
+            transition: transform 0.1s;
+        }
+
+        .volume-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.3);
+        }
+
+        /* Firefox Support */
+        .volume-slider::-moz-range-track {
+            height: 6px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+        }
+
+        .volume-slider::-moz-range-progress {
+            background-color: var(--primary);
+            height: 6px;
+            border-radius: 10px 0 0 10px;
+        }
+
+        .volume-slider::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            border: none;
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: 0 0 4px rgba(0,0,0,0.5);
+        }
+
+        /* Status Pill Indicator */
+        .status {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 8px 18px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #64748b;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+
+        .status-dot.active {
+            background: #2ed573;
+            box-shadow: 0 0 10px #2ed573;
+        }
+
+        /* Animations */
+        @keyframes rotateVinyl {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.6; }
+            50% { opacity: 0.3; }
+            100% { transform: scale(1.15); opacity: 0; }
+        }
+
+        @keyframes marquee {
+            0% { transform: translate3d(0, 0, 0); }
+            100% { transform: translate3d(-100%, 0, 0); }
+        }
+
+        @keyframes bounce {
+            0% { height: 2px; }
+            100% { height: 15px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="player-container">
+        <audio id="radio-audio" crossorigin="anonymous"></audio>
+
+        <div class="station-art-container" id="station-art-container">
+            <div class="station-art" id="station-art">
+                <svg viewBox="0 0 24 24">
+                    <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8Z" />
+                </svg>
+            </div>
+        </div>
+
+        <div class="meta">
+            <h1>Jakpat Radio</h1>
+            <div class="track-info-container">
+                <span class="track-info static" id="track-info">Live Stream</span>
+            </div>
+            <div class="visualizer" id="visualizer">
+                <div class="visualizer-bar"></div>
+                <div class="visualizer-bar"></div>
+                <div class="visualizer-bar"></div>
+                <div class="visualizer-bar"></div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button class="play-btn" id="play-btn" title="Play">
+                <svg id="play-icon" viewBox="0 0 24 24">
+                    <path d="M8,5.14V19.14L19,12.14L8,5.14Z" />
+                </svg>
+            </button>
+
+            <div class="volume-container">
+                <button class="volume-icon-btn" id="volume-toggle" title="Mute/Unmute">
+                    <svg id="volume-icon" viewBox="0 0 24 24">
+                        <path d="M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.85 14,18.71V20.77C18,19.86 21,16.28 21,12C21,7.72 18,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16C15.5,15.29 16.5,13.77 16.5,12M3,9V15H7L12,20V4L7,9H3Z" />
+                    </svg>
+                </button>
+                <input type="range" class="volume-slider" id="volume-slider" min="0" max="1" step="0.01" value="0.8">
+            </div>
+
+            <div class="status">
+                <span class="status-dot" id="status-dot"></span>
+                <span id="status-text">Connecting...</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const streamUrl = 'https://stream-stream.jakpat.dev/radio/jakpat/index.m3u8';
+    const audio = document.getElementById('radio-audio');
+    const playBtn = document.getElementById('play-btn');
+    const playIcon = document.getElementById('play-icon');
+    const volumeSlider = document.getElementById('volume-slider');
+    const volumeToggle = document.getElementById('volume-toggle');
+    const volumeIcon = document.getElementById('volume-icon');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    const stationArtContainer = document.getElementById('station-art-container');
+    const trackInfo = document.getElementById('track-info');
+    const visualizer = document.getElementById('visualizer');
+
+    const playPath = "M8,5.14V19.14L19,12.14L8,5.14Z";
+    const pausePath = "M14,19H18V5H14M6,19H10V5H6V19Z";
+
+    // SVGs for volume state transitions
+    const volHighPath = "M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.85 14,18.71V20.77C18,19.86 21,16.28 21,12C21,7.72 18,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16C15.5,15.29 16.5,13.77 16.5,12M3,9V15H7L12,20V4L7,9H3Z";
+    const volMutePath = "M12,4L7,9H3V15H7L12,20V4M16.5,12A4.5,4.5 0 0,0 14,7.97V16.03A4.5,4.5 0 0,0 16.5,12Z";
+    const volSilentPath = "M4.34,2.93L2.93,4.34L7.29,8.7L3,13H7L12,18V13.41L16.12,17.53C15.5,17.92 14.78,18.23 14,18.42V20.5C15.35,20.26 16.6,19.67 17.63,18.84L19.66,20.87L21.07,19.46L12,10.39L4.34,2.93M12,4L9.91,6.09L12,8.18V4M19,12C19,10.15 18.12,8.5 16.73,7.44L18.19,5.98C20,7.5 21,9.63 21,12C21,14.07 20.26,15.96 19.06,17.43L17.59,15.96C18.47,14.86 19,13.5 19,12M14,7.97C14.74,8.36 15.33,9.04 15.5,9.87L14,8.37V7.97Z";
+
+    let hls;
+    let previousVolume = 0.8;
+
+    function initPlayer() {
+        updateVolumeUI(volumeSlider.value);
+
+        if (Hls.isSupported()) {
+            setupHls();
+        } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
+            audio.src = streamUrl;
+            audio.addEventListener('canplay', () => updateStatus('Ready', '#3498db'));
+            setupNativeMetadata();
+        } else {
+            updateStatus('Not supported in this browser', '#e74c3c');
+        }
+    }
+
+    function setupHls() {
+        if (hls) {
+            hls.destroy();
+        }
+        
+        hls = new Hls({
+            liveDurationInfinity: true,
+            enableWorker: true,
+            
+            // --- FIXED STREAM STABILITY CONFIGURATION ---
+            liveSyncDuration: 15,          // Runs smoothly 15s behind real-time (prevents packet-lag)
+            maxBufferLength: 30,           // Pre-loads up to 30s of buffer to survive bad networks
+            maxMaxBufferLength: 60,        // High boundary limit
+            liveMaxLatencyDuration: 25,    // Forces stream alignment if latency drops too far
+            
+            manifestLoadingMaxRetry: 15,   // Resilient retry attempts
+            manifestLoadingRetryDelay: 1000,
+            levelLoadingMaxRetry: 15,
+            levelLoadingRetryDelay: 1000
+        });
+        
+        hls.loadSource(streamUrl);
+        hls.attachMedia(audio);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            updateStatus('Ready', '#3498db');
+        });
+
+        // 1. IN-STREAM METADATA DECODER (Decodes native ID3 tags from MPEG-TS blocks)
+        hls.on(Hls.Events.FRAG_PARSING_METADATA, (event, data) => {
+            if (data && data.samples) {
+                data.samples.forEach(sample => {
+                    try {
+                        const text = new TextDecoder('utf-8').decode(sample.data);
+                        parseAndSetMetadata(text);
+                    } catch (e) {
+                        console.error("Error decoding metadata sample:", e);
+                    }
+                });
+            }
+        });
+
+        // 2. FALLBACK METADATA LISTENER (Safari and mobile webview hooks)
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+            setupNativeMetadata();
+        });
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+            if (data.fatal) {
+                switch (data.type) {
+                    case Hls.ErrorTypes.NETWORK_ERROR:
+                        updateStatus('Network issue. Reconnecting...', '#e74c3c');
+                        hls.startLoad();
+                        break;
+                    case Hls.ErrorTypes.MEDIA_ERROR:
+                        updateStatus('Recovering sound...', '#e74c3c');
+                        hls.recoverMediaError();
+                        break;
+                    default:
+                        initPlayer();
+                        break;
+                }
+            }
+        });
+    }
+
+    // iOS and Safari background-media hooks
+    function setupNativeMetadata() {
+        const tracks = audio.textTracks;
+        
+        const handleTrack = (track) => {
+            if (track.kind === 'metadata') {
+                track.mode = 'showing';
+                track.addEventListener('cuechange', () => {
+                    const activeCue = track.activeCues[0];
+                    if (activeCue) {
+                        let rawValue = activeCue.text || activeCue.value?.data || activeCue.value;
+                        if (rawValue instanceof ArrayBuffer || rawValue instanceof Uint8Array) {
+                            rawValue = new TextDecoder('utf-8').decode(rawValue);
+                        }
+                        if (rawValue) {
+                            parseAndSetMetadata(rawValue);
+                        }
+                    }
+                });
+            }
+        };
+
+        for (let i = 0; i < tracks.length; i++) {
+            handleTrack(tracks[i]);
+        }
+        
+        tracks.addEventListener('addtrack', (e) => {
+            handleTrack(e.track);
+        });
+    }
+
+    // Clean structural metadata tags safely
+    function parseAndSetMetadata(rawText) {
+        if (typeof rawText !== 'string') return;
+        
+        // Remove common UTF-16 BOM and non-printable control characters
+        let cleanText = rawText.replace(/[\u0000-\u001F\u007F-\u009F\uFEFF\uFFFE]/g, "").trim();
+        
+        // Strip out specific technical ID3 tag patterns (TIT2 = Title, TPE1 = Artist)
+        cleanText = cleanText.replace(/^(TIT2|TPE1|COMM|XXX|PRIV|TIT1|TPE2)/, "").trim();
+
+        if (cleanText && cleanText.length > 2) {
+            updateTrackInfo(cleanText);
+        }
+    }
+
+    function updateTrackInfo(text) {
+        if (trackInfo.innerText === text) return;
+        
+        trackInfo.innerText = text;
+        trackInfo.classList.add('static');
+        trackInfo.style.animationPlayState = 'paused';
+
+        // Update Mobile Control Center metadata
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: text,
+                artist: 'Jakpat Radio',
+                album: 'Live Stream'
+            });
+        }
+
+        // Wait brief millisecond cycle for DOM styling calculation before triggering scroll
+        setTimeout(() => {
+            const containerWidth = trackInfo.parentElement.offsetWidth;
+            const textWidth = trackInfo.offsetWidth;
+
+            if (textWidth > containerWidth) {
+                trackInfo.classList.remove('static');
+                trackInfo.style.animationPlayState = 'running';
+            }
+        }, 100);
+    }
+
+    playBtn.addEventListener('click', () => {
+        if (audio.paused) {
+            if (hls) {
+                hls.destroy(); 
+                setupHls();
+            } else {
+                audio.load();
+            }
+
+            audio.play()
+                .then(() => {
+                    playIcon.querySelector('path').setAttribute('d', pausePath);
+                    stationArtContainer.classList.add('playing');
+                    visualizer.classList.add('active');
+                    updateStatus('Live', '#2ed573');
+                    statusDot.classList.add('active');
+                })
+                .catch(err => {
+                    console.error("Playback interrupted:", err);
+                    updateStatus('Retry Playing', '#f1c40f');
+                });
+        } else {
+            audio.pause();
+            if (hls) {
+                hls.stopLoad();
+            }
+            playIcon.querySelector('path').setAttribute('d', playPath);
+            stationArtContainer.classList.remove('playing');
+            visualizer.classList.remove('active');
+            updateStatus('Paused', '#7f8c8d');
+            statusDot.classList.remove('active');
+        }
+    });
+
+    function updateVolumeUI(value) {
+        audio.volume = value;
+        volumeSlider.value = value;
+        document.documentElement.style.setProperty('--volume-percent', `${value * 100}%`);
+
+        if (value == 0) {
+            volumeIcon.querySelector('path').setAttribute('d', volSilentPath);
+        } else if (value < 0.4) {
+            volumeIcon.querySelector('path').setAttribute('d', volMutePath);
+        } else {
+            volumeIcon.querySelector('path').setAttribute('d', volHighPath);
+        }
+    }
+
+    volumeSlider.addEventListener('input', (e) => {
+        updateVolumeUI(e.target.value);
+    });
+
+    volumeToggle.addEventListener('click', () => {
+        if (audio.volume > 0) {
+            previousVolume = audio.volume;
+            updateVolumeUI(0);
+        } else {
+            updateVolumeUI(previousVolume);
+        }
+    });
+
+    function updateStatus(text, color) {
+        statusText.innerText = text;
+        statusDot.style.backgroundColor = color;
+        if (text !== 'Live') {
+            statusDot.classList.remove('active');
+        }
+    }
+
+    window.addEventListener('DOMContentLoaded', initPlayer);
+</script>
+</body>
+</html>
