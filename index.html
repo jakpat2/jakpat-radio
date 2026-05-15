@@ -450,7 +450,7 @@
         </div>
     </div>
 
-    <script>
+<script>
     const streamUrl = 'https://stream-stream.jakpat.dev/radio/jakpat/index.m3u8';
     const audio = document.getElementById('radio-audio');
     const playBtn = document.getElementById('play-btn');
@@ -466,236 +466,144 @@
 
     const playPath = "M8,5.14V19.14L19,12.14L8,5.14Z";
     const pausePath = "M14,19H18V5H14M6,19H10V5H6V19Z";
-
-    // SVGs for volume state transitions
     const volHighPath = "M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.85 14,18.71V20.77C18,19.86 21,16.28 21,12C21,7.72 18,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16C15.5,15.29 16.5,13.77 16.5,12M3,9V15H7L12,20V4L7,9H3Z";
     const volMutePath = "M12,4L7,9H3V15H7L12,20V4M16.5,12A4.5,4.5 0 0,0 14,7.97V16.03A4.5,4.5 0 0,0 16.5,12Z";
     const volSilentPath = "M4.34,2.93L2.93,4.34L7.29,8.7L3,13H7L12,18V13.41L16.12,17.53C15.5,17.92 14.78,18.23 14,18.42V20.5C15.35,20.26 16.6,19.67 17.63,18.84L19.66,20.87L21.07,19.46L12,10.39L4.34,2.93M12,4L9.91,6.09L12,8.18V4M19,12C19,10.15 18.12,8.5 16.73,7.44L18.19,5.98C20,7.5 21,9.63 21,12C21,14.07 20.26,15.96 19.06,17.43L17.59,15.96C18.47,14.86 19,13.5 19,12M14,7.97C14.74,8.36 15.33,9.04 15.5,9.87L14,8.37V7.97Z";
 
     let hls;
     let previousVolume = 0.8;
+    let isBuffering = false;
 
     function initPlayer() {
         updateVolumeUI(volumeSlider.value);
-
-        if (Hls.isSupported()) {
-            setupHls();
-        } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
-            audio.src = streamUrl;
-            audio.addEventListener('canplay', () => updateStatus('Ready', '#3498db'));
-            setupNativeMetadata();
-        } else {
-            updateStatus('Not supported in this browser', '#e74c3c');
-        }
+        setupHls(); // Load HLS immediately
+        setupMediaSession();
     }
 
     function setupHls() {
-        if (hls) {
-            hls.destroy();
-        }
-        
-        hls = new Hls({
-            liveDurationInfinity: true,
-            enableWorker: true,
-            
-            // --- FIXED STREAM STABILITY CONFIGURATION ---
-            liveSyncDuration: 15,          // Runs smoothly 15s behind real-time (prevents packet-lag)
-            maxBufferLength: 30,           // Pre-loads up to 30s of buffer to survive bad networks
-            maxMaxBufferLength: 60,        // High boundary limit
-            liveMaxLatencyDuration: 25,    // Forces stream alignment if latency drops too far
-            
-            manifestLoadingMaxRetry: 15,   // Resilient retry attempts
-            manifestLoadingRetryDelay: 1000,
-            levelLoadingMaxRetry: 15,
-            levelLoadingRetryDelay: 1000
-        });
-        
-        hls.loadSource(streamUrl);
-        hls.attachMedia(audio);
+        if (Hls.isSupported()) {
+            hls = new Hls({
+                liveSyncDuration: 10,
+                liveMaxLatencyDuration: 15,
+                enableWorker: true,
+                manifestLoadingMaxRetry: Infinity,
+                autoStartLoad: true // Ensure segments start fetching on page load
+            });
+            hls.loadSource(streamUrl);
+            hls.attachMedia(audio);
 
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            updateStatus('Ready', '#3498db');
-        });
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                updateStatus('Ready', '#3498db');
+            });
 
-        // 1. IN-STREAM METADATA DECODER (Decodes native ID3 tags from MPEG-TS blocks)
-        hls.on(Hls.Events.FRAG_PARSING_METADATA, (event, data) => {
-            if (data && data.samples) {
+            hls.on(Hls.Events.FRAG_PARSING_METADATA, (event, data) => {
                 data.samples.forEach(sample => {
-                    try {
-                        const text = new TextDecoder('utf-8').decode(sample.data);
-                        parseAndSetMetadata(text);
-                    } catch (e) {
-                        console.error("Error decoding metadata sample:", e);
-                    }
+                    const text = new TextDecoder('utf-8').decode(sample.data);
+                    parseAndSetMetadata(text);
                 });
-            }
-        });
+            });
 
-        // 2. FALLBACK METADATA LISTENER (Safari and mobile webview hooks)
-        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-            setupNativeMetadata();
-        });
-
-        hls.on(Hls.Events.ERROR, (event, data) => {
-            if (data.fatal) {
-                switch (data.type) {
-                    case Hls.ErrorTypes.NETWORK_ERROR:
-                        updateStatus('Network issue. Reconnecting...', '#e74c3c');
-                        hls.startLoad();
-                        break;
-                    case Hls.ErrorTypes.MEDIA_ERROR:
-                        updateStatus('Recovering sound...', '#e74c3c');
-                        hls.recoverMediaError();
-                        break;
-                    default:
-                        initPlayer();
-                        break;
+            // Error handling to keep it from getting stuck on "Connecting" if server blips
+            hls.on(Hls.Events.ERROR, (event, data) => {
+                if (data.fatal) {
+                    updateStatus('Reconnecting...', '#e74c3c');
+                    hls.startLoad();
                 }
-            }
-        });
-    }
-
-    // iOS and Safari background-media hooks
-    function setupNativeMetadata() {
-        const tracks = audio.textTracks;
-        
-        const handleTrack = (track) => {
-            if (track.kind === 'metadata') {
-                track.mode = 'showing';
-                track.addEventListener('cuechange', () => {
-                    const activeCue = track.activeCues[0];
-                    if (activeCue) {
-                        let rawValue = activeCue.text || activeCue.value?.data || activeCue.value;
-                        if (rawValue instanceof ArrayBuffer || rawValue instanceof Uint8Array) {
-                            rawValue = new TextDecoder('utf-8').decode(rawValue);
-                        }
-                        if (rawValue) {
-                            parseAndSetMetadata(rawValue);
-                        }
-                    }
-                });
-            }
-        };
-
-        for (let i = 0; i < tracks.length; i++) {
-            handleTrack(tracks[i]);
-        }
-        
-        tracks.addEventListener('addtrack', (e) => {
-            handleTrack(e.track);
-        });
-    }
-
-    // Clean structural metadata tags safely
-    function parseAndSetMetadata(rawText) {
-        if (typeof rawText !== 'string') return;
-        
-        // Remove common UTF-16 BOM and non-printable control characters
-        let cleanText = rawText.replace(/[\u0000-\u001F\u007F-\u009F\uFEFF\uFFFE]/g, "").trim();
-        
-        // Strip out specific technical ID3 tag patterns (TIT2 = Title, TPE1 = Artist)
-        cleanText = cleanText.replace(/^(TIT2|TPE1|COMM|XXX|PRIV|TIT1|TPE2)/, "").trim();
-
-        if (cleanText && cleanText.length > 2) {
-            updateTrackInfo(cleanText);
+            });
+        } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
+            audio.src = streamUrl;
+            updateStatus('Ready', '#3498db');
         }
     }
 
-    function updateTrackInfo(text) {
-        if (trackInfo.innerText === text) return;
-        
-        trackInfo.innerText = text;
-        trackInfo.classList.add('static');
-        trackInfo.style.animationPlayState = 'paused';
-
-        // Update Mobile Control Center metadata
+    function setupMediaSession() {
         if ('mediaSession' in navigator) {
             navigator.mediaSession.metadata = new MediaMetadata({
-                title: text,
-                artist: 'Jakpat Radio',
-                album: 'Live Stream'
+                title: 'Jakpat Radio',
+                artist: 'Live Stream'
             });
+            navigator.mediaSession.setActionHandler('play', handlePlay);
+            navigator.mediaSession.setActionHandler('pause', handlePause);
+        }
+    }
+
+    function handlePause() {
+        audio.pause();
+        if (hls) hls.stopLoad();
+        updateStatus('Paused', '#7f8c8d');
+        stationArtContainer.classList.remove('playing');
+        visualizer.classList.remove('active');
+        statusDot.classList.remove('active');
+        playIcon.querySelector('path').setAttribute('d', playPath);
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+    }
+
+    function handlePlay() {
+        if (isBuffering) return;
+        isBuffering = true;
+        updateStatus('Buffering...', '#f1c40f');
+
+        if (hls) {
+            hls.startLoad(-1); // Resync to live
+            if (audio.buffered.length > 0) {
+                audio.currentTime = audio.buffered.end(audio.buffered.length - 1);
+            }
         }
 
-        // Wait brief millisecond cycle for DOM styling calculation before triggering scroll
-        setTimeout(() => {
-            const containerWidth = trackInfo.parentElement.offsetWidth;
-            const textWidth = trackInfo.offsetWidth;
-
-            if (textWidth > containerWidth) {
-                trackInfo.classList.remove('static');
-                trackInfo.style.animationPlayState = 'running';
-            }
-        }, 100);
+        audio.play().then(() => {
+            isBuffering = false;
+            updateStatus('Live', '#2ed573');
+            stationArtContainer.classList.add('playing');
+            visualizer.classList.add('active');
+            statusDot.classList.add('active');
+            playIcon.querySelector('path').setAttribute('d', pausePath);
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+        }).catch(err => {
+            console.error("Playback failed", err);
+            isBuffering = false;
+            updateStatus('Ready', '#3498db');
+        });
     }
 
     playBtn.addEventListener('click', () => {
         if (audio.paused) {
-            if (hls) {
-                hls.destroy(); 
-                setupHls();
-            } else {
-                audio.load();
-            }
-
-            audio.play()
-                .then(() => {
-                    playIcon.querySelector('path').setAttribute('d', pausePath);
-                    stationArtContainer.classList.add('playing');
-                    visualizer.classList.add('active');
-                    updateStatus('Live', '#2ed573');
-                    statusDot.classList.add('active');
-                })
-                .catch(err => {
-                    console.error("Playback interrupted:", err);
-                    updateStatus('Retry Playing', '#f1c40f');
-                });
+            handlePlay();
         } else {
-            audio.pause();
-            if (hls) {
-                hls.stopLoad();
-            }
-            playIcon.querySelector('path').setAttribute('d', playPath);
-            stationArtContainer.classList.remove('playing');
-            visualizer.classList.remove('active');
-            updateStatus('Paused', '#7f8c8d');
-            statusDot.classList.remove('active');
+            handlePause();
         }
     });
+
+    function parseAndSetMetadata(rawText) {
+        let cleanText = rawText.replace(/[\u0000-\u001F\u007F-\u009F\uFEFF\uFFFE]/g, "").trim();
+        cleanText = cleanText.replace(/^(TIT2|TPE1|COMM|XXX|PRIV|TIT1|TPE2)/, "").trim();
+        if (cleanText.length > 2 && trackInfo.innerText !== cleanText) {
+            trackInfo.innerText = cleanText;
+            const isLong = trackInfo.offsetWidth > trackInfo.parentElement.offsetWidth;
+            trackInfo.classList.toggle('static', !isLong);
+            trackInfo.style.animationPlayState = isLong ? 'running' : 'paused';
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.metadata = new MediaMetadata({ title: cleanText, artist: 'Jakpat Radio' });
+            }
+        }
+    }
 
     function updateVolumeUI(value) {
         audio.volume = value;
         volumeSlider.value = value;
         document.documentElement.style.setProperty('--volume-percent', `${value * 100}%`);
-
-        if (value == 0) {
-            volumeIcon.querySelector('path').setAttribute('d', volSilentPath);
-        } else if (value < 0.4) {
-            volumeIcon.querySelector('path').setAttribute('d', volMutePath);
-        } else {
-            volumeIcon.querySelector('path').setAttribute('d', volHighPath);
-        }
+        const path = value == 0 ? volSilentPath : (value < 0.4 ? volMutePath : volHighPath);
+        volumeIcon.querySelector('path').setAttribute('d', path);
     }
 
-    volumeSlider.addEventListener('input', (e) => {
-        updateVolumeUI(e.target.value);
-    });
-
+    volumeSlider.addEventListener('input', (e) => updateVolumeUI(e.target.value));
     volumeToggle.addEventListener('click', () => {
-        if (audio.volume > 0) {
-            previousVolume = audio.volume;
-            updateVolumeUI(0);
-        } else {
-            updateVolumeUI(previousVolume);
-        }
+        if (audio.volume > 0) { previousVolume = audio.volume; updateVolumeUI(0); }
+        else { updateVolumeUI(previousVolume); }
     });
 
     function updateStatus(text, color) {
         statusText.innerText = text;
         statusDot.style.backgroundColor = color;
-        if (text !== 'Live') {
-            statusDot.classList.remove('active');
-        }
     }
 
     window.addEventListener('DOMContentLoaded', initPlayer);
