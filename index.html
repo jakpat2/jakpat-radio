@@ -482,16 +482,20 @@
     }
 
     function setupHls() {
-        if (Hls.isSupported()) {
-            hls = new Hls({
-                liveSyncDuration: 10,
-                liveMaxLatencyDuration: 15,
-                enableWorker: true,
-                manifestLoadingMaxRetry: Infinity,
-                autoStartLoad: true // Ensure segments start fetching on page load
-            });
-            hls.loadSource(streamUrl);
-            hls.attachMedia(audio);
+    if (Hls.isSupported()) {
+        hls = new Hls({
+            // Tells the player to stay back a bit further from the live edge
+            liveSyncDurationCount: 4, // Sync 4 segments behind live edge
+            
+            maxBufferLength: 30,      // Maximum buffer size in seconds
+            maxMaxBufferLength: 60,   // Allows it to grow if the network is great
+            
+            enableWorker: true,
+            manifestLoadingMaxRetry: Infinity,
+            autoStartLoad: true 
+        });
+        hls.loadSource(streamUrl);
+        hls.attachMedia(audio);
 
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
                 updateStatus('Ready', '#3498db');
@@ -546,9 +550,6 @@
 
         if (hls) {
             hls.startLoad(-1); // Resync to live
-            if (audio.buffered.length > 0) {
-                audio.currentTime = audio.buffered.end(audio.buffered.length - 1);
-            }
         }
 
         audio.play().then(() => {
