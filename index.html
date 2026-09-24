@@ -686,33 +686,7 @@ async function resolveArtwork(artist, title, metadataCover) {
         console.warn("Apple Music fetch failed, trying proxy fallback...", e);
     }
 
-    // Step 2: Fallback to Deezer routed via a public CORS proxy
-    try {
-        const deezerUrl = `https://api.deezer.com/search?q=${encodeURIComponent(queryStr)}`;
-        const proxyRes = await fetch(`https://corsproxy.io/?${encodeURIComponent(deezerUrl)}`);
-        
-        if (proxyRes.ok) {
-            const data = await proxyRes.json();
-            if (data && data.data && data.data.length > 0) {
-                const match = data.data.find(item => {
-                    const itemArtist = cleanString(item.artist?.name);
-                    const itemTitle = cleanString(item.title);
-                    return (itemArtist.includes(targetArtist) || targetArtist.includes(itemArtist)) &&
-                           (itemTitle.includes(targetTitle) || targetTitle.includes(itemTitle));
-                }) || data.data[0];
-
-                if (match && match.album && match.album.cover_big) {
-                    return match.album.cover_big;
-                } else if (match && match.album && match.album.cover_medium) {
-                    return match.album.cover_medium;
-                }
-            }
-        }
-    } catch (e) {
-        console.warn("Deezer proxy fallback failed, using default image...", e);
-    }
-
-    // Step 3: Ultimate Fallback
+    // Step 2: Fallback
     return defaultArtwork;
 }
 
